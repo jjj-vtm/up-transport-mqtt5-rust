@@ -28,18 +28,25 @@ license = "Apache-2.0"
 name = "up-client-mqtt5-rust"
 readme = "README.md"
 repository = "https://github.com/eclipse-uprotocol/up-client-mqtt5-rust"
-rust-version = "1.72"
+rust-version = "1.76"
 version = "0.1.0"
 
 [dependencies]
+async-channel = {version = "1.6" } 
 async-trait = { version = "0.1" }
 bytes = { version = "1.5" }
-paho-mqtt = { version = "0.12.1" }
+env_logger = { version = "0.10" }
+futures = { version = "0.3" }
+log = { version = "^0.4" }
+paho-mqtt = { version = "0.12.3", features = ["vendored-ssl"] }
+protobuf = { version = "3.3" }
 rand = { version = "0.8" }
 regex = { version = "1.10" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
-up-rust = { git = "https://github.com/eclipse-uprotocol/up-rust", version = "0.1.5" }
+tokio = { version = "1.38", features = ["full"] }
+tokio-macros = { version = "2.3" }
+up-rust = { git = "https://github.com/eclipse-uprotocol/up-rust", rev = "da722852004f657fa8d0282369fcfccb0ccda112" }
 url = { version = "2.5" }
 uuid = { version = "1.7", features = ["v8"] }
 
