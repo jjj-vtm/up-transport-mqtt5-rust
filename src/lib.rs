@@ -22,8 +22,10 @@ use async_channel::Receiver;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::StreamExt;
-use log::{info, trace, warn};
-use paho_mqtt::{self as mqtt, AsyncReceiver, Message, MQTT_VERSION_5, QOS_1};
+use log::{debug, info, trace, warn};
+use paho_mqtt::{
+    self as mqtt, AsyncReceiver, Message, Properties, SslOptions, MQTT_VERSION_5, QOS_1,
+};
 use protobuf::MessageDyn;
 use tokio::{sync::RwLock, task::JoinHandle};
 use up_rust::{
@@ -80,6 +82,22 @@ pub trait MockableMqttClient: Sync + Send {
 
 pub struct AsyncMqttClient {
     inner_mqtt_client: Arc<mqtt::AsyncClient>,
+    sub_identifier_available: bool,
+}
+
+fn check_subscription_identifier_available_in_response(props: &Properties) -> bool {
+    let property = props.get(paho_mqtt::PropertyCode::SubscriptionIdentifiersAvailable);
+    if let Some(property) = property {
+        let property_value = property.get_byte();
+        if let Some(value) = property_value {
+            if value != 1 {
+                debug!("Subscription Identifier not supported by broker");
+                return false;
+            }
+        }
+    }
+    debug!("Subscription Identifier supported by broker");
+    true
 }
 
 // Create a set of poperties with a single Subscription ID
@@ -103,10 +121,9 @@ impl MockableMqttClient for AsyncMqttClient {
     where
         Self: Sized,
     {
-        let mqtt_protocol = if config.ssl_options.is_some() {
-            "mqtts"
-        } else {
-            "mqtt"
+        let mqtt_protocol = match config.mqtt_protocol {
+            MqttProtocol::Mqtt => "mqtt",
+            MqttProtocol::Mqtts => "mqtts",
         };
 
         let mqtt_uri = format!(
@@ -128,22 +145,28 @@ impl MockableMqttClient for AsyncMqttClient {
 
         let message_stream = mqtt_cli.get_stream(100);
 
-        // TODO: Integrate ssl options when connecting, may need a username, etc.
-        let conn_opts = mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
+        let conn_opts =
+            mqtt::ConnectOptionsBuilder::with_mqtt_version(MQTT_VERSION_5)
             .clean_start(false)
             .properties(mqtt::properties![mqtt::PropertyCode::SessionExpiryInterval => config.session_expiry_interval])
+            .ssl_options(config.ssl_options.or_else(|| Some(SslOptions::default())).unwrap())
+            .user_name(config.username)
             .finalize();
 
-        mqtt_cli.connect(conn_opts).await.map_err(|e| {
+        let token = mqtt_cli.connect(conn_opts).await.map_err(|e| {
             UStatus::fail_with_code(
                 UCode::INTERNAL,
                 format!("Unable to connect to mqtt broker: {e:?}"),
             )
         })?;
 
+        let sub_identifier_available =
+            check_subscription_identifier_available_in_response(token.properties());
+
         Ok((
             Self {
                 inner_mqtt_client: Arc::new(mqtt_cli),
+                sub_identifier_available,
             },
             message_stream,
         ))
@@ -173,8 +196,18 @@ impl MockableMqttClient for AsyncMqttClient {
     /// * `topic` - Topic to subscribe to.
     async fn subscribe(&self, topic: &str, id: i32) -> Result<(), UStatus> {
         // QOS 1 - Delivered and received at least once
+        let sub_id_prop = if self.sub_identifier_available {
+            debug!(
+                "Subcription identifier supported by broker. Subscribe with subscription id {}",
+                id
+            );
+            Some(sub_id(id))
+        } else {
+            None
+        };
+
         self.inner_mqtt_client
-            .subscribe_with_options(topic, QOS_1, None, sub_id(id))
+            .subscribe_with_options(topic, QOS_1, None, sub_id_prop)
             .await
             .map_err(|e| {
                 UStatus::fail_with_code(
@@ -207,8 +240,10 @@ impl MockableMqttClient for AsyncMqttClient {
 
 /// Configuration for the mqtt client.
 pub struct MqttConfig {
+    /// Schema of the mqtt broker (mqtt or mqtts)
+    pub mqtt_protocol: MqttProtocol,
     /// Port of the mqtt broker to connect to.
-    pub mqtt_port: String,
+    pub mqtt_port: u16,
     /// Hostname of the mqtt broker.
     pub mqtt_hostname: String,
     /// Max buffered messages for the mqtt client.
@@ -219,6 +254,8 @@ pub struct MqttConfig {
     pub session_expiry_interval: i32,
     /// Optional SSL options for the mqtt connection.
     pub ssl_options: Option<mqtt::SslOptions>,
+    /// Username
+    pub username: String,
 }
 
 /// UP Client for mqtt.
@@ -243,6 +280,12 @@ pub struct UPClientMqtt {
 pub enum UPClientMqttType {
     Device,
     Cloud,
+}
+
+/// Type of MQTT protocol
+pub enum MqttProtocol {
+    Mqtt,
+    Mqtts,
 }
 
 impl UPClientMqtt {
