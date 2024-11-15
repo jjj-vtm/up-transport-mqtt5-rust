@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use up_client_mqtt5_rust::{MqttConfig, MqttProtocol, UPClientMqtt, UPClientMqttType};
 use up_rust::{UListener, UMessage, UStatus, UUID};
+use up_transport_mqtt5::{MqttConfig, MqttProtocol, UPClientMqtt, UPClientMqttType};
 
 pub struct TestListener {
     pub recv_data: Arc<Mutex<String>>,
