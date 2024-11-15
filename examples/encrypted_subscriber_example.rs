@@ -21,8 +21,8 @@ use async_trait::async_trait;
 use env_logger::{Builder, Target};
 use log::LevelFilter;
 use paho_mqtt::SslOptionsBuilder;
-use up_client_mqtt5_rust::{MqttConfig, MqttProtocol, UPClientMqtt, UPClientMqttType};
 use up_rust::{UListener, UMessage, UStatus, UTransport, UUri, UUID};
+use up_transport_mqtt5::{MqttConfig, MqttProtocol, UPClientMqtt, UPClientMqttType};
 
 const WILDCARD_ENTITY_ID: u32 = 0x0000_FFFF;
 const WILDCARD_ENTITY_VERSION: u32 = 0x0000_00FF;
