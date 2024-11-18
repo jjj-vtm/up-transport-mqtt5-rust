@@ -13,6 +13,7 @@
 
 [package]
 author = "Eclipse Foundation uProtocol project"
+description = "MQTT5 Rust Transport library implementation for Eclipse uProtocol"
 documentation = "https://github.com/eclipse-uprotocol/up-spec#readme"
 edition = "2021"
 exclude = [
@@ -23,9 +24,10 @@ exclude = [
     ".github/*",
     ".gitignore",
 ]
+homepage = "https://github.com/eclipse-uprotocol/up-client-mqtt5-rust"
 keywords = ["uProtocol", "SDK", "MQTT", "MQTT5"]
 license = "Apache-2.0"
-name = "up-client-mqtt5-rust"
+name = "up-transport-mqtt5"
 readme = "README.md"
 repository = "https://github.com/eclipse-uprotocol/up-client-mqtt5-rust"
 rust-version = "1.76"
