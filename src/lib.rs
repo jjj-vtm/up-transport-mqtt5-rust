@@ -26,10 +26,11 @@ use log::{debug, info, trace, warn};
 use paho_mqtt::{
     self as mqtt, AsyncReceiver, Message, Properties, SslOptions, MQTT_VERSION_5, QOS_1,
 };
-use protobuf::MessageDyn;
+use protobuf::{well_known_types::wrappers::Int32Value, Message, MessageDyn};
 use tokio::{sync::RwLock, task::JoinHandle};
 use up_rust::{
-    ComparableListener, UAttributes, UAttributesValidators, UCode, UMessage, UStatus, UUri, UUID,
+    ComparableListener, UAttributes, UAttributesValidators, UCode, UMessage, UMessageBuilder,
+    UStatus, UUri, UUID,
 };
 
 pub mod transport;
@@ -362,21 +363,23 @@ impl UPClientMqtt {
                     .get_int(mqtt::PropertyCode::SubscriptionIdentifier);
 
                 // Get attributes from mqtt header.
-                let uattributes = {
-                    match UPClientMqtt::get_uattributes_from_mqtt_properties(msg.properties()) {
-                        Ok(uattributes) => uattributes,
-                        Err(e) => {
-                            warn!("Unable to get UAttributes from mqtt properties: {}", e);
-                            continue;
+                let umessage = if msg.properties().is_empty() {
+                    protobuf::Message::parse_from_bytes(msg.payload()).unwrap()
+                } else {
+                    let uattributes = {
+                        match UPClientMqtt::get_uattributes_from_mqtt_properties(msg.properties()) {
+                            Ok(uattributes) => uattributes,
+                            Err(e) => {
+                                warn!("Unable to get UAttributes from mqtt properties: {}", e);
+                                continue;
+                            }
                         }
+                    };
+                    UMessage {
+                        attributes: Some(uattributes).into(),
+                        payload: Some(Bytes::copy_from_slice(msg.payload())),
+                        ..Default::default()
                     }
-                };
-
-                // Create UMessage from UAttributes and UPayload.
-                let umessage = UMessage {
-                    attributes: Some(uattributes).into(),
-                    payload: Some(Bytes::copy_from_slice(msg.payload())),
-                    ..Default::default()
                 };
 
                 let topic_map_read = topic_map.read().await;
