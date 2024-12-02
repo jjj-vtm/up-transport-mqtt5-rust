@@ -34,13 +34,6 @@ use up_rust::{
 
 pub mod transport;
 
-// URI Wildcard consts
-// TODO: Remove once up-rust contains/exposes these values
-const WILDCARD_AUTHORITY: &str = "*";
-const WILDCARD_ENTITY_ID: u32 = 0x0000_FFFF;
-const WILDCARD_ENTITY_VERSION: u32 = 0x0000_00FF;
-const WILDCARD_RESOURCE_ID: u32 = 0x0000_FFFF;
-
 // Attribute field names
 const UURI_NAME: &str = "uuri";
 const UUID_NAME: &str = "uuid";
@@ -915,27 +908,27 @@ impl UPClientMqtt {
     /// # Arguments
     /// * `uri` - UUri to convert to mqtt topic segment.
     fn uri_to_mqtt_topic_segment(&self, uri: &UUri) -> String {
-        let authority = if uri.authority_name.is_empty() {
+        let authority = if uri.has_empty_authority() {
             &self.authority_name
-        } else if uri.authority_name == WILDCARD_AUTHORITY {
+        } else if uri.has_wildcard_authority() {
             "+"
         } else {
             &uri.authority_name
         };
 
-        let ue_id = if uri.ue_id == WILDCARD_ENTITY_ID {
+        let ue_id = if uri.has_wildcard_entity_type() {
             "+".into()
         } else {
             format!("{:X}", uri.ue_id)
         };
 
-        let ue_ver = if uri.ue_version_major == WILDCARD_ENTITY_VERSION {
+        let ue_ver = if uri.has_wildcard_version() {
             "+".into()
         } else {
             format!("{:X}", uri.ue_version_major)
         };
 
-        let res_id = if uri.resource_id == WILDCARD_RESOURCE_ID {
+        let res_id = if uri.has_wildcard_resource_id() {
             "+".into()
         } else {
             format!("{:X}", uri.resource_id)
@@ -969,6 +962,13 @@ mod tests {
     use test_case::test_case;
 
     use super::*;
+
+    // URI Wildcard consts
+    // TODO: Remove once up-rust contains/exposes these values
+    const WILDCARD_AUTHORITY: &str = "*";
+    const WILDCARD_ENTITY_ID: u32 = 0x0000_FFFF;
+    const WILDCARD_ENTITY_VERSION: u32 = 0x0000_00FF;
+    const WILDCARD_RESOURCE_ID: u32 = 0x0000_FFFF;
 
     /// Constants defining the protobuf field numbers for UAttributes.
     pub const ID_NUM: &str = "1";
