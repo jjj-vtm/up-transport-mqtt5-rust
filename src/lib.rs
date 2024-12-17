@@ -26,11 +26,10 @@ use log::{debug, info, trace, warn};
 use paho_mqtt::{
     self as mqtt, AsyncReceiver, Message, Properties, SslOptions, MQTT_VERSION_5, QOS_1,
 };
-use protobuf::{well_known_types::wrappers::Int32Value, Message, MessageDyn};
+use protobuf::MessageDyn;
 use tokio::{sync::RwLock, task::JoinHandle};
 use up_rust::{
-    ComparableListener, UAttributes, UAttributesValidators, UCode, UMessage, UMessageBuilder,
-    UStatus, UUri, UUID,
+    ComparableListener, UAttributes, UAttributesValidators, UCode, UMessage, UStatus, UUri, UUID,
 };
 
 pub mod transport;
@@ -382,51 +381,51 @@ impl UPClientMqtt {
                     }
                 };
 
-                let topic_map_read = topic_map.read().await;
-                let subscription_map_read = subscription_map.read().await;
-
                 // If subscription ID is present, only notify listeners for that subscription.
-                if let Some(sub_id) = sub_id {
-                    let Some(sub_topic) = subscription_map_read.get(&sub_id) else {
-                        trace!(
-                            "Received message with subscription id that is not registered: {}",
-                            sub_id
-                        );
-                        continue;
+                let listeners = if let Some(sub_id) = sub_id {
+                    let sub_topic = {
+                        let subscription_map_read = subscription_map.read().await;
+
+                        let Some(sub_topic) = subscription_map_read.get(&sub_id) else {
+                            trace!(
+                                "Received message with subscription id that is not registered: {}",
+                                sub_id
+                            );
+                            continue;
+                        };
+                        sub_topic.clone()
                     };
 
-                    let Some(listeners) = topic_map_read.get(sub_topic) else {
-                        trace!("No listeners registered for topic: {}", sub_topic);
-                        continue;
+                    let owned_listeners = {
+                        let topic_map_read = topic_map.read().await;
+
+                        let Some(listeners) = topic_map_read.get(&sub_topic) else {
+                            trace!("No listeners registered for topic: {}", sub_topic);
+                            continue;
+                        };
+                        listeners.clone()
                     };
-                    let owned_listeners = listeners.clone();
 
-                    // Release the locks early, before message dispatch
-                    drop(topic_map_read);
-                    drop(subscription_map_read);
-
-                    for listener in owned_listeners {
-                        let msg = umessage.clone();
-                        tokio::spawn(async move {
-                            listener.on_receive(msg.clone()).await;
-                        });
-                    }
+                    owned_listeners
                 } else {
                     // Filter the topic map for topics that match the received topic, including wildcards.
-                    let listeners: Vec<ComparableListener> = topic_map_read
-                        .iter()
-                        .filter(|(key, _)| UPClientMqtt::compare_topic(topic, key))
-                        .flat_map(|(_topic, listener)| listener.to_owned())
-                        .collect();
-                    // Drop lock before message dispatch
-                    drop(topic_map_read);
+                    let listeners = {
+                        let topic_map_read = topic_map.read().await;
 
-                    for listener in listeners {
-                        let msg = umessage.clone();
-                        tokio::spawn(async move {
-                            listener.on_receive(msg.clone()).await;
-                        });
-                    }
+                        topic_map_read
+                            .iter()
+                            .filter(|(key, _)| UPClientMqtt::compare_topic(topic, key))
+                            .flat_map(|(_topic, listener)| listener.to_owned())
+                            .collect()
+                    };
+                    listeners
+                };
+
+                for listener in listeners {
+                    let msg = umessage.clone();
+                    tokio::spawn(async move {
+                        listener.on_receive(msg.clone()).await;
+                    });
                 }
             }
         })
