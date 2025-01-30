@@ -25,7 +25,10 @@ use mqtt_client::{MqttClientOperations, PahoBasedMqttClientOperations};
 pub use mqtt_client::{MqttClientOptions, SslOptions};
 use paho_mqtt::{self as mqtt, Message, QOS_1};
 use protobuf::{Enum, EnumOrUnknown, MessageField};
-use tokio::{sync::{Mutex, RwLock}, task::JoinHandle};
+use tokio::{
+    sync::{Mutex, RwLock},
+    task::JoinHandle,
+};
 use up_rust::{
     ComparableListener, UAttributes, UAttributesValidators, UCode, UMessage, UMessageType,
     UPayloadFormat, UPriority, UStatus, UUri, UUriError, UUID,
@@ -184,11 +187,12 @@ impl Mqtt5Transport {
         let topic_listener_map_handle = topic_listener_map.clone();
 
         // Create the MQTT client
-        let client_operations =
-            Arc::new(Mutex::new(mqtt_client::PahoBasedMqttClientOperations::new_client(&options)?));
+        let client_operations = Arc::new(Mutex::new(
+            mqtt_client::PahoBasedMqttClientOperations::new_client(&options)?,
+        ));
 
         let stream = client_operations.lock().await.get_message_stream();
-        
+
         // Create the callback for processing messages received from the broker
         let message_callback_handle = Some(Self::create_cb_message_handler(
             client_operations.clone(),
@@ -196,9 +200,8 @@ impl Mqtt5Transport {
             topic_listener_map_handle,
             stream,
         ));
-        
-        let mut mm = client_operations.lock().await;
-        let res = mm.connect(&options).await;
+
+        let res = client_operations.lock().await.connect(&options).await;
 
         res.map(|_| Self {
             mqtt_client: client_operations.clone(),
@@ -237,15 +240,15 @@ impl Mqtt5Transport {
                     let client = client_operations.lock().await;
                     let session_present = client.reconnect().await;
                     match session_present {
-                        mqtt_client::HasSession::SessionPresent => {},
+                        mqtt_client::HasSession::SessionPresent => {}
                         mqtt_client::HasSession::NoSession => {
+                            debug!("Re-subscribing to previously subscribed topics");
                             let subs = subscription_map.read().await;
                             for id_topic in subs.iter() {
                                 // TODO: Error handling if resubscribe fails ... but how? panic?
                                 let _ = client.subscribe(id_topic.1, *id_topic.0).await;
-                            };
-                             
-                        },
+                            }
+                        }
                     }
                     continue;
                 };
@@ -393,7 +396,9 @@ impl Mqtt5Transport {
         }
         let msg = msg_builder.finalize();
 
-        self.mqtt_client.lock().await
+        self.mqtt_client
+            .lock()
+            .await
             .publish(msg)
             .await
             .map(|_| {

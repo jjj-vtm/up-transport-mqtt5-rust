@@ -17,7 +17,7 @@ use async_channel::Receiver;
 use async_trait::async_trait;
 #[cfg(feature = "cli")]
 use clap::Args;
-use log::trace;
+use log::{info, trace};
 use tokio::time::sleep;
 use up_rust::{UCode, UStatus};
 
@@ -329,6 +329,7 @@ impl PahoBasedMqttClientOperations {
                     return HasSession::NoSession;
                 }
             }
+            info!("Reconnect not successfull, retrying in {:?}", delay);
             sleep(delay).await;
         }
 
