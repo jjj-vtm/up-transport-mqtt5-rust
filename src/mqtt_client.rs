@@ -18,8 +18,36 @@ use async_trait::async_trait;
 #[cfg(feature = "cli")]
 use clap::Args;
 use log::trace;
+use tokio::time::sleep;
 use up_rust::{UCode, UStatus};
 
+pub enum HasSession {
+    SessionPresent,
+    NoSession,
+}
+struct DoubleDelay {
+    cur: Duration,
+    max: Duration,
+}
+impl Iterator for DoubleDelay {
+    type Item = Duration;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur == self.max {
+            return Some(self.max);
+        }
+        let current = self.cur;
+        let next = self.cur.mul_f32(2.0);
+
+        if next >= self.max {
+            self.cur = self.max;
+            return Some(current);
+        }
+        // Set next delay
+        self.cur = next;
+        Some(current)
+    }
+}
 #[cfg(feature = "cli")]
 const PARAM_MQTT_BUFFER_SIZE: &str = "mqtt-buffer-size";
 #[cfg(feature = "cli")]
@@ -137,8 +165,6 @@ impl TryFrom<&MqttClientOptions> for paho_mqtt::ConnectOptions {
     fn try_from(options: &MqttClientOptions) -> Result<Self, Self::Error> {
         let ssl_options = paho_mqtt::SslOptions::try_from(options)?;
         let mut connect_options_builder = paho_mqtt::ConnectOptionsBuilder::new_v5();
-        connect_options_builder
-            .automatic_reconnect(Duration::from_secs(1), Duration::from_secs(16));
         connect_options_builder
             // [impl->req~up-transport-mqtt5-session-config~1]
             .clean_start(options.clean_start)
@@ -285,6 +311,28 @@ impl PahoBasedMqttClientOperations {
     /// to `Self::connect` returns.
     pub(crate) fn get_message_stream(&mut self) -> Receiver<Option<paho_mqtt::Message>> {
         self.inner_mqtt_client.get_stream(100)
+    }
+
+    pub(crate) async fn reconnect(&self) -> HasSession {
+        let mut delay = DoubleDelay {
+            cur: Duration::from_secs(0),
+            max: Duration::from_secs(16),
+        };
+
+        while let Some(delay) = delay.next() {
+            let session = self.inner_mqtt_client.reconnect().await;
+            if let Ok(conn_resp) = session {
+                let session = conn_resp.connect_response().unwrap().session_present;
+                if session {
+                    return HasSession::SessionPresent;
+                } else {
+                    return HasSession::NoSession;
+                }
+            }
+            sleep(delay).await;
+        }
+
+        HasSession::NoSession
     }
 
     /// Establishes the connection to the configured broker.

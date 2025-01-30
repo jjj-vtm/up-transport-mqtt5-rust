@@ -82,7 +82,7 @@ mod tests {
     };
 
     use test_case::test_case;
-    use tokio::sync::RwLock;
+    use tokio::sync::{Mutex, RwLock};
 
     use crate::{mqtt_client::MockMqttClientOperations, TransportMode};
 
@@ -179,7 +179,7 @@ mod tests {
     ) {
         let expected_payload = payload.to_string();
         let owned_topic = expected_topic.to_string();
-        let mut client_operations = MockMqttClientOperations::new();
+        let mut client_operations =MockMqttClientOperations::new();
         client_operations
             .expect_publish()
             .once()
@@ -193,7 +193,7 @@ mod tests {
                 })
             });
         let client = Mqtt5Transport {
-            mqtt_client: Box::new(client_operations),
+            mqtt_client:  Arc::new(Mutex::new(client_operations)),
             subscription_topic_map: Arc::new(RwLock::new(HashMap::new())),
             topic_listener_map: Arc::new(RwLock::new(HashMap::new())),
             authority_name: "VIN.vehicles".to_string(),
@@ -247,7 +247,7 @@ mod tests {
         );
 
         let client = Mqtt5Transport {
-            mqtt_client: Box::new(client_operations),
+            mqtt_client:  Arc::new(Mutex::new(client_operations)),
             subscription_topic_map: Arc::new(RwLock::new(HashMap::new())),
             topic_listener_map,
             authority_name: "VIN.vehicles".to_string(),
@@ -325,7 +325,7 @@ mod tests {
         );
 
         let client = Mqtt5Transport {
-            mqtt_client: Box::new(client_operations),
+            mqtt_client:  Arc::new(Mutex::new(client_operations)),
             subscription_topic_map: Arc::new(RwLock::new(HashMap::new())),
             topic_listener_map,
             authority_name: "VIN.vehicles".to_string(),

@@ -20,12 +20,12 @@ use std::{
 use async_channel::Receiver;
 use bytes::Bytes;
 use futures::stream::StreamExt;
-use log::{debug, trace};
-use mqtt_client::MqttClientOperations;
+use log::{debug, trace, warn};
+use mqtt_client::{MqttClientOperations, PahoBasedMqttClientOperations};
 pub use mqtt_client::{MqttClientOptions, SslOptions};
 use paho_mqtt::{self as mqtt, Message, QOS_1};
 use protobuf::{Enum, EnumOrUnknown, MessageField};
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::{sync::{Mutex, RwLock}, task::JoinHandle};
 use up_rust::{
     ComparableListener, UAttributes, UAttributesValidators, UCode, UMessage, UMessageType,
     UPayloadFormat, UPriority, UStatus, UUri, UUriError, UUID,
@@ -148,7 +148,7 @@ impl TransportMode {
 /// An MQTT 5 based uProtocol transport implementation.
 pub struct Mqtt5Transport {
     /// Client instance for connecting to mqtt broker.
-    mqtt_client: Box<dyn MqttClientOperations>,
+    mqtt_client: Arc<Mutex<dyn MqttClientOperations>>,
     /// Map of subscription identifiers to subscribed topics.
     subscription_topic_map: Arc<RwLock<HashMap<SubscriptionIdentifier, String>>>,
     /// Map of topics to listeners.
@@ -184,18 +184,24 @@ impl Mqtt5Transport {
         let topic_listener_map_handle = topic_listener_map.clone();
 
         // Create the MQTT client
-        let mut client_operations =
-            mqtt_client::PahoBasedMqttClientOperations::new_client(&options)?;
+        let client_operations =
+            Arc::new(Mutex::new(mqtt_client::PahoBasedMqttClientOperations::new_client(&options)?));
 
+        let stream = client_operations.lock().await.get_message_stream();
+        
         // Create the callback for processing messages received from the broker
         let message_callback_handle = Some(Self::create_cb_message_handler(
+            client_operations.clone(),
             subscription_topic_map_handle,
             topic_listener_map_handle,
-            client_operations.get_message_stream(),
+            stream,
         ));
+        
+        let mut mm = client_operations.lock().await;
+        let res = mm.connect(&options).await;
 
-        client_operations.connect(&options).await.map(|_| Self {
-            mqtt_client: Box::new(client_operations),
+        res.map(|_| Self {
+            mqtt_client: client_operations.clone(),
             subscription_topic_map,
             topic_listener_map,
             authority_name,
@@ -219,6 +225,7 @@ impl Mqtt5Transport {
     // * `topic_map` - Map of topics to listeners.
     // * `message_stream` - Stream of incoming mqtt messages.
     fn create_cb_message_handler(
+        client_operations: Arc<Mutex<PahoBasedMqttClientOperations>>,
         subscription_map: Arc<RwLock<HashMap<SubscriptionIdentifier, String>>>,
         topic_map: Arc<RwLock<HashMap<String, HashSet<ComparableListener>>>>,
         mut message_stream: Receiver<Option<Message>>,
@@ -226,8 +233,15 @@ impl Mqtt5Transport {
         tokio::spawn(async move {
             while let Some(msg_opt) = message_stream.next().await {
                 let Some(msg) = msg_opt else {
-                    //TODO: None means that the connection is dropped. This should be handled correctly.
-                    trace!("Received empty message from stream.");
+                    warn!("Connection lost, reconnecting");
+                    let session_present = client_operations.lock().await.reconnect().await;
+                    match session_present {
+                        mqtt_client::HasSession::SessionPresent => {},
+                        mqtt_client::HasSession::NoSession => {
+                            // Resubscribe to all topics
+                             
+                        },
+                    }
                     continue;
                 };
                 let topic = msg.topic();
@@ -299,7 +313,7 @@ impl Mqtt5Transport {
                 for listener in listeners {
                     let msg = umessage.clone();
                     tokio::spawn(async move {
-                        listener.on_receive(msg.clone()).await;
+                        listener.on_receive(msg).await;
                     });
                 }
             }
@@ -374,7 +388,7 @@ impl Mqtt5Transport {
         }
         let msg = msg_builder.finalize();
 
-        self.mqtt_client
+        self.mqtt_client.lock().await
             .publish(msg)
             .await
             .map(|_| {
@@ -410,7 +424,7 @@ impl Mqtt5Transport {
             let mut subscription_topic_map = self.subscription_topic_map.write().await;
             subscription_topic_map.insert(id, topic.to_string());
             // Subscribe to topic.
-            if let Err(sub_err) = self.mqtt_client.subscribe(topic, id).await {
+            if let Err(sub_err) = self.mqtt_client.lock().await.subscribe(topic, id).await {
                 // If subscribe fails, add subscription id back to free subscription ids.
                 self.add_free_subscription_id(id).await;
                 return Err(sub_err);
@@ -478,7 +492,7 @@ impl Mqtt5Transport {
             topic_listener_map.remove(topic);
 
             // Unsubscribe from topic.
-            self.mqtt_client.unsubscribe(topic).await?;
+            self.mqtt_client.lock().await.unsubscribe(topic).await?;
         }
 
         Ok(())
@@ -1101,7 +1115,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_free_subscription_id() {
         let up_client = Mqtt5Transport {
-            mqtt_client: Box::new(MockMqttClientOperations::new()),
+            mqtt_client: Arc::new(Mutex::new(MockMqttClientOperations::new())),
             subscription_topic_map: Arc::new(RwLock::new(HashMap::new())),
             topic_listener_map: Arc::new(RwLock::new(HashMap::new())),
             authority_name: "test".to_string(),
@@ -1141,7 +1155,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_free_subscription_id() {
         let up_client = Mqtt5Transport {
-            mqtt_client: Box::new(MockMqttClientOperations::new()),
+            mqtt_client: Arc::new(Mutex::new(MockMqttClientOperations::new())),
             subscription_topic_map: Arc::new(RwLock::new(HashMap::new())),
             topic_listener_map: Arc::new(RwLock::new(HashMap::new())),
             authority_name: "test".to_string(),
@@ -1172,7 +1186,7 @@ mod tests {
             .return_const(Ok(()));
 
         let up_client = Mqtt5Transport {
-            mqtt_client: Box::new(client_operations),
+            mqtt_client: Arc::new(Mutex::new(client_operations)),
             subscription_topic_map: sub_map.clone(),
             topic_listener_map: topic_map.clone(),
             authority_name: "test".to_string(),
@@ -1216,7 +1230,7 @@ mod tests {
         client_operations.expect_unsubscribe().return_const(Ok(()));
 
         let up_client = Mqtt5Transport {
-            mqtt_client: Box::new(client_operations),
+            mqtt_client: Arc::new(Mutex::new(client_operations)),
             subscription_topic_map: sub_map.clone(),
             topic_listener_map: topic_map.clone(),
             authority_name: "test".to_string(),
