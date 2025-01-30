@@ -234,11 +234,16 @@ impl Mqtt5Transport {
             while let Some(msg_opt) = message_stream.next().await {
                 let Some(msg) = msg_opt else {
                     warn!("Connection lost, reconnecting");
-                    let session_present = client_operations.lock().await.reconnect().await;
+                    let client = client_operations.lock().await;
+                    let session_present = client.reconnect().await;
                     match session_present {
                         mqtt_client::HasSession::SessionPresent => {},
                         mqtt_client::HasSession::NoSession => {
-                            // Resubscribe to all topics
+                            let subs = subscription_map.read().await;
+                            for id_topic in subs.iter() {
+                                // TODO: Error handling if resubscribe fails ... but how? panic?
+                                let _ = client.subscribe(id_topic.1, *id_topic.0).await;
+                            };
                              
                         },
                     }

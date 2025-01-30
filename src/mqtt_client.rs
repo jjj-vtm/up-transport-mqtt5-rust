@@ -315,7 +315,7 @@ impl PahoBasedMqttClientOperations {
 
     pub(crate) async fn reconnect(&self) -> HasSession {
         let mut delay = DoubleDelay {
-            cur: Duration::from_secs(0),
+            cur: Duration::from_secs(1),
             max: Duration::from_secs(16),
         };
 
@@ -430,10 +430,24 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use paho_mqtt::ConnectOptions;
 
-    use super::MqttClientOptions;
-
+    use super::{DoubleDelay, MqttClientOptions};
+    #[test]
+    fn test_delay() {
+        let mut double_delay = DoubleDelay {
+            cur: Duration::from_secs(1),
+            max: Duration::from_secs(16),
+        };
+        assert_eq!(double_delay.next(), Some(Duration::from_secs(1)));
+        assert_eq!(double_delay.next(), Some(Duration::from_secs(2)));
+        assert_eq!(double_delay.next(), Some(Duration::from_secs(4)));
+        assert_eq!(double_delay.next(), Some(Duration::from_secs(8)));
+        assert_eq!(double_delay.next(), Some(Duration::from_secs(16)));
+        assert_eq!(double_delay.next(), Some(Duration::from_secs(16)));
+    }
     #[test]
     // [utest->req~up-transport-mqtt5-session-config~1]
     fn test_config_parsing() {
