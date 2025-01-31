@@ -26,25 +26,34 @@ pub enum HasSession {
     NoSession,
 }
 struct DoubleDelay {
-    cur: Duration,
-    max: Duration,
+    cur_delay: Duration,
+    max_delay: Duration,
+}
+
+impl DoubleDelay {
+    fn new(max_delay: Duration) -> Self {
+        DoubleDelay {
+            cur_delay: Duration::from_secs(1),
+            max_delay,
+        }
+    }
 }
 impl Iterator for DoubleDelay {
     type Item = Duration;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur == self.max {
-            return Some(self.max);
+        if self.cur_delay == self.max_delay {
+            return Some(self.max_delay);
         }
-        let current = self.cur;
-        let next = self.cur.mul_f32(2.0);
+        let current = self.cur_delay;
+        let next = self.cur_delay.mul_f32(2.0);
 
-        if next >= self.max {
-            self.cur = self.max;
+        if next >= self.max_delay {
+            self.cur_delay = self.max_delay;
             return Some(current);
         }
         // Set next delay
-        self.cur = next;
+        self.cur_delay = next;
         Some(current)
     }
 }
@@ -313,13 +322,11 @@ impl PahoBasedMqttClientOperations {
         self.inner_mqtt_client.get_stream(100)
     }
 
+    /// Reconnects to the broker using a simple exponential backoff.
     pub(crate) async fn reconnect(&self) -> HasSession {
-        let mut delay = DoubleDelay {
-            cur: Duration::from_secs(1),
-            max: Duration::from_secs(16),
-        };
+        let delay = DoubleDelay::new(Duration::from_secs(16));
 
-        while let Some(delay) = delay.next() {
+        for delay in delay {
             let session = self.inner_mqtt_client.reconnect().await;
             if let Ok(conn_resp) = session {
                 let session = conn_resp.connect_response().unwrap().session_present;
@@ -438,10 +445,8 @@ mod tests {
     use super::{DoubleDelay, MqttClientOptions};
     #[test]
     fn test_delay() {
-        let mut double_delay = DoubleDelay {
-            cur: Duration::from_secs(1),
-            max: Duration::from_secs(16),
-        };
+        let mut double_delay = DoubleDelay::new(Duration::from_secs(16));
+
         assert_eq!(double_delay.next(), Some(Duration::from_secs(1)));
         assert_eq!(double_delay.next(), Some(Duration::from_secs(2)));
         assert_eq!(double_delay.next(), Some(Duration::from_secs(4)));
