@@ -29,6 +29,9 @@ jobs:
   check-msrv:
     uses: eclipse-uprotocol/ci-cd/.github/workflows/rust-verify-msrv.yaml@main
 
+  check-latest-deps:
+    uses: eclipse-uprotocol/ci-cd/.github/workflows/rust-verify-latest-deps.yaml@main
+
   test-all-features:
     uses: eclipse-uprotocol/ci-cd/.github/workflows/rust-test-featurematrix.yaml@main
 
