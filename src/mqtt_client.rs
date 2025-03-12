@@ -24,7 +24,6 @@ use backon::Retryable;
 #[cfg(feature = "cli")]
 use clap::Args;
 use log::{debug, trace};
-use paho_mqtt::Error;
 use up_rust::{UCode, UStatus};
 
 use crate::{listener_registry::SubscribedTopicProvider, SubscriptionIdentifier};
@@ -429,7 +428,7 @@ impl PahoBasedMqttClientOperations {
     async fn recreate_subscriptions(
         mqtt_client: Arc<paho_mqtt::AsyncClient>,
         subscribed_topics: HashMap<SubscriptionIdentifier, String>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), paho_mqtt::Error> {
         for (subscription_id, topic_filter) in subscribed_topics {
             // we ignore any potential errors when creating the properties because the worst
             // thing that can happen is that we subscribe without a subscription identifier
