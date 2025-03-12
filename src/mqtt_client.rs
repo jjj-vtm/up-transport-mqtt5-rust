@@ -452,8 +452,6 @@ impl PahoBasedMqttClientOperations {
                 );
             }
         }
-        SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
-            .store(false, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 }
@@ -541,6 +539,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
                                 .with_min_delay(Duration::from_millis(500))
                                 .with_max_delay(Duration::from_secs(10))
                                 .without_max_times();
+                            // We can ignore the result since we will retry indefinitely
                             let _ = (|| {
                                 Self::recreate_subscriptions(
                                     mqtt_client.clone(),
@@ -553,6 +552,8 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
                                 true
                             })
                             .await;
+                            SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
+                                .store(false, std::sync::atomic::Ordering::Release);
                         });
                     }
                 }
