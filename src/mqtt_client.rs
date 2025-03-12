@@ -569,6 +569,15 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
     }
 
     async fn publish(&self, mqtt_message: paho_mqtt::Message) -> Result<(), UStatus> {
+        if SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "Failed to publish since there is a subscription recreation running",
+            ));
+        }
+
         self.inner_mqtt_client
             .publish(mqtt_message)
             .await
@@ -578,7 +587,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
 
     async fn subscribe(&self, topic: &str, id: u16) -> Result<(), UStatus> {
         if SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
-            .load(std::sync::atomic::Ordering::Acquire)
+            .load(std::sync::atomic::Ordering::Relaxed)
         {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
