@@ -14,7 +14,7 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::{atomic::AtomicBool, Arc, RwLock},
     time::Duration,
 };
 
@@ -24,6 +24,7 @@ use backon::Retryable;
 #[cfg(feature = "cli")]
 use clap::Args;
 use log::{debug, trace};
+use paho_mqtt::Error;
 use up_rust::{UCode, UStatus};
 
 use crate::{listener_registry::SubscribedTopicProvider, SubscriptionIdentifier};
@@ -62,6 +63,8 @@ const DEFAULT_CLEAN_START: bool = false;
 const DEFAULT_MAX_BUFFERED_MESSAGES: u16 = 0;
 const DEFAULT_MAX_SUBSCRIPTIONS: u16 = 50;
 const DEFAULT_SESSION_EXPIRY_INTERVAL: u32 = 0;
+
+static SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(feature = "cli", derive(Args))]
 /// Configuration options for the MQTT client.
@@ -422,12 +425,11 @@ impl PahoBasedMqttClientOperations {
             })?;
         Ok(properties)
     }
-
     // [impl->req~up-transport-mqtt5-reconnection~1]
     async fn recreate_subscriptions(
-        mqtt_client: &paho_mqtt::AsyncClient,
+        mqtt_client: Arc<paho_mqtt::AsyncClient>,
         subscribed_topics: HashMap<SubscriptionIdentifier, String>,
-    ) {
+    ) -> Result<(), Error> {
         for (subscription_id, topic_filter) in subscribed_topics {
             // we ignore any potential errors when creating the properties because the worst
             // thing that can happen is that we subscribe without a subscription identifier
@@ -442,6 +444,7 @@ impl PahoBasedMqttClientOperations {
                     "Failed to recreate subscription [id: {}, topic filter: {}]: {}",
                     subscription_id, topic_filter, err,
                 );
+                return Err(err);
             } else {
                 debug!(
                     "Successfully recreated subscription [id: {}, topic filter: {}]",
@@ -449,6 +452,9 @@ impl PahoBasedMqttClientOperations {
                 );
             }
         }
+        SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
+            .store(false, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 }
 
@@ -521,7 +527,33 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
                             let topic_provider_read = topic_provider.read().await;
                             topic_provider_read.get_subscribed_topics()
                         };
-                        Self::recreate_subscriptions(&mqtt_client, subscribed_topics).await;
+                        // We try to recreate the subscribtions in the background with an infinte retry.
+                        tokio::spawn(async move {
+                            // Check if there is already a background job re-creating the subscribtions.
+                            if SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
+                                .load(std::sync::atomic::Ordering::Acquire)
+                            {
+                                return;
+                            }
+                            let backoff_builder = backon::ExponentialBuilder::new()
+                                .with_factor(2.0)
+                                .with_jitter()
+                                .with_min_delay(Duration::from_millis(500))
+                                .with_max_delay(Duration::from_secs(10))
+                                .without_max_times();
+                            let _ = (|| {
+                                Self::recreate_subscriptions(
+                                    mqtt_client.clone(),
+                                    subscribed_topics.clone(),
+                                )
+                            })
+                            .retry(&backoff_builder)
+                            .when(|err| {
+                                debug!("Failed to recreate previously subscribed handlers: {err}");
+                                true
+                            })
+                            .await;
+                        });
                     }
                 }
             }
