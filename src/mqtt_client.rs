@@ -527,7 +527,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
                             let topic_provider_read = topic_provider.read().await;
                             topic_provider_read.get_subscribed_topics()
                         };
-                        // We try to recreate the subscribtions in the background with an infinte retry.
+                        // We try to recreate the subscribtions in the background with an infinite retry.
                         tokio::spawn(async move {
                             // Check if there is already a background job re-creating the subscribtions.
                             if SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
@@ -576,6 +576,14 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
     }
 
     async fn subscribe(&self, topic: &str, id: u16) -> Result<(), UStatus> {
+        if SUBSCRIPTION_RECREATION_IN_PROGRESS_IN_PROGRESS
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "Failed to subscribe since there is a subscription recreation running",
+            ));
+        }
         let subscription_properties = if self.is_subscription_ids_supported() {
             trace!("Creating subscription [topic: {}, ID: {}]", topic, id);
             Some(Self::create_subscription_id_properties(id).map_err(|_e| {
