@@ -573,7 +573,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
             .load(std::sync::atomic::Ordering::Relaxed)
         {
             return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::UNAVAILABLE,
                 "Failed to publish since there is a subscription recreation running",
             ));
         }
@@ -590,7 +590,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
             .load(std::sync::atomic::Ordering::Relaxed)
         {
             return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::UNAVAILABLE,
                 "Failed to subscribe since there is a subscription recreation running",
             ));
         }
