@@ -220,7 +220,25 @@ impl Mqtt5Transport {
             cb_message_handle.abort();
         }
     }
-
+    async fn do_reconnect(
+        client_operations: Arc<Mutex<PahoBasedMqttClientOperations>>,
+        subscription_map: Arc<RwLock<HashMap<SubscriptionIdentifier, String>>>,
+    ) {
+        warn!("Connection lost, reconnecting");
+        let client = client_operations.lock().await;
+        let session_present = client.reconnect().await;
+        match session_present {
+            mqtt_client::HasSession::SessionPresent => {}
+            mqtt_client::HasSession::NoSession => {
+                debug!("Re-subscribing to previously subscribed topics");
+                let subs = subscription_map.read().await;
+                for id_topic in subs.iter() {
+                    // TODO: Error handling if resubscribe fails ... but how? panic?
+                    let _ = client.subscribe(id_topic.1, *id_topic.0).await;
+                }
+            }
+        }
+    }
     // Creates a callback message handler that listens for incoming messages and notifies listeners asynchronously.
     //
     // # Arguments
@@ -236,20 +254,7 @@ impl Mqtt5Transport {
         tokio::spawn(async move {
             while let Some(msg_opt) = message_stream.next().await {
                 let Some(msg) = msg_opt else {
-                    warn!("Connection lost, reconnecting");
-                    let client = client_operations.lock().await;
-                    let session_present = client.reconnect().await;
-                    match session_present {
-                        mqtt_client::HasSession::SessionPresent => {}
-                        mqtt_client::HasSession::NoSession => {
-                            debug!("Re-subscribing to previously subscribed topics");
-                            let subs = subscription_map.read().await;
-                            for id_topic in subs.iter() {
-                                // TODO: Error handling if resubscribe fails ... but how? panic?
-                                let _ = client.subscribe(id_topic.1, *id_topic.0).await;
-                            }
-                        }
-                    }
+                    Self::do_reconnect(client_operations.clone(), subscription_map.clone()).await;
                     continue;
                 };
                 let topic = msg.topic();
