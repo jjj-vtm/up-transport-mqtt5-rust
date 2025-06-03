@@ -30,6 +30,7 @@ and does not spawn any threads itself.
 [tokio `Runtime`]: https://docs.rs/tokio/latest/tokio/runtime/index.html
 */
 use std::sync::Arc;
+use std::collections::HashSet;
 
 use async_channel::Receiver;
 use bytes::Bytes;
@@ -366,8 +367,15 @@ impl Mqtt5Transport {
                     if subscription_ids.is_empty() {
                         registered_listeners_read.determine_listeners_for_topic(msg.topic())
                     } else {
-                        registered_listeners_read
-                            .determine_listeners_for_subscription_ids(subscription_ids.as_slice())
+                        subscription_ids
+                            .iter()
+                            .flat_map(|id| {
+                                registered_listeners_read
+                                    .determine_listeners_for_subscription_id(id)
+                            })
+                            .fold(HashSet::new(), |acc, elem| {
+                                acc.union(elem).cloned().collect()
+                            })
                     }
                 };
 
