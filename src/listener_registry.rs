@@ -20,7 +20,7 @@ use log::debug;
 use up_rust::{ComparableListener, UCode, UStatus};
 
 pub(crate) type SubscriptionIdentifier = u16;
-type SubscriptionTopics = HashMap<SubscriptionIdentifier, String>;
+type SubscriptionTopics = HashMap<SubscriptionIdentifier, (String, HashSet<ComparableListener>)>;
 type TopicListeners = paho_mqtt::TopicMatcher<HashSet<ComparableListener>>;
 
 pub(crate) struct RegisteredListeners {
@@ -44,7 +44,7 @@ impl Default for RegisteredListeners {
 
 impl RegisteredListeners {
     fn new_subscription_ids(size: u16) -> HashSet<SubscriptionIdentifier> {
-        (1..(size) + 1).collect()
+        (1..=size).collect()
     }
 
     pub(crate) fn new(max_subscriptions: u16, max_listeners_per_subscription: u16) -> Self {
@@ -68,7 +68,7 @@ impl RegisteredListeners {
     fn find_subscription_id(&self, topic_filter: &str) -> Option<SubscriptionIdentifier> {
         self.subscription_topics.iter().find_map(
             |(k, v)| {
-                if v == topic_filter {
+                if v.0 == topic_filter {
                     Some(*k)
                 } else {
                     None
@@ -143,6 +143,16 @@ impl RegisteredListeners {
         // [impl->dsn~utransport-registerlistener-idempotent~1]
         // [impl->dsn~utransport-registerlistener-listener-reuse~1]
         // [impl->dsn~utransport-registerlistener-number-of-listeners~1]
+
+        // If we know the subscription id already we insert the listener there
+        if let Some(sub_id) = self.find_subscription_id(topic_filter) {
+            // OK to unwrap since we checked that we know the sub_id
+            self.subscription_topics
+                .get_mut(&sub_id)
+                .unwrap()
+                .1
+                .insert(comp_listener.clone());
+        }
         if let Some(listeners) = self.topic_listeners.get_mut(topic_filter) {
             // [impl->dsn~utransport-registerlistener-error-resource-exhausted~1]
             if listeners.len() >= self.max_listeners_per_subscription {
@@ -161,8 +171,10 @@ impl RegisteredListeners {
             // this fails if all subscription IDs have already been taken
             // [impl->dsn~utransport-registerlistener-error-resource-exhausted~1]
             let subscription_id = self.get_free_subscription_id()?;
+            let mut hs = HashSet::new();
+            hs.insert(comp_listener.clone());
             self.subscription_topics
-                .insert(subscription_id, topic_filter.to_string());
+                .insert(subscription_id, (topic_filter.to_string(), hs));
             let mut listeners = HashSet::new();
             listeners.insert(comp_listener);
             self.topic_listeners.insert(topic_filter, listeners);
@@ -207,7 +219,7 @@ impl RegisteredListeners {
             return false;
         };
 
-        if !registered_listeners.remove(&ComparableListener::new(listener)) {
+        if !registered_listeners.remove(&ComparableListener::new(listener.clone())) {
             return false;
         }
 
@@ -216,6 +228,15 @@ impl RegisteredListeners {
             if let Some(sub_id) = self.find_subscription_id(topic_filter) {
                 self.release_subscription_id(sub_id, topic_filter);
             }
+        }
+
+        // Remove from subscription_id mapping
+        if let Some(sub_id) = self.find_subscription_id(topic_filter) {
+            self.subscription_topics
+                .get_mut(&sub_id)
+                .unwrap()
+                .1
+                .remove(&ComparableListener::new(listener));
         }
         true
     }
@@ -234,23 +255,13 @@ impl RegisteredListeners {
     }
 
     /// Determines listeners registered for subscription IDs.
-    pub(crate) fn determine_listeners_for_subscription_ids(
+    pub(crate) fn determine_listeners_for_subscription_id(
         &self,
-        subscription_ids: &[SubscriptionIdentifier],
-    ) -> HashSet<ComparableListener> {
-        let mut listeners_to_invoke = HashSet::new();
-        subscription_ids.iter().for_each(|sub_id| {
-            if let Some(listeners) = self
-                .subscription_topics
-                .get(sub_id)
-                .and_then(|topic_filter| self.topic_listeners.get(topic_filter))
-            {
-                listeners.iter().for_each(|listener| {
-                    listeners_to_invoke.insert(listener.to_owned());
-                });
-            }
-        });
-        listeners_to_invoke
+        subscription_id: &SubscriptionIdentifier,
+    ) -> Option<&HashSet<ComparableListener>> {
+        self.subscription_topics
+            .get(subscription_id)
+            .map(|topic_listener| &topic_listener.1)
     }
 }
 
@@ -262,7 +273,7 @@ impl SubscribedTopicProvider for RegisteredListeners {
     fn get_subscribed_topics(&self) -> HashMap<SubscriptionIdentifier, String> {
         self.subscription_topics
             .iter()
-            .map(|(subscription_id, topic_filter)| (*subscription_id, topic_filter.to_owned()))
+            .map(|(subscription_id, topic_filter)| (*subscription_id, topic_filter.0.to_owned()))
             .collect()
     }
 }
@@ -292,8 +303,8 @@ mod tests {
             .expect("Did not create new subscription ID");
 
         let listeners =
-            registered_listeners.determine_listeners_for_subscription_ids(&[subscription_id]);
-        assert!(listeners.len() == 1 && listeners.contains(&expected_listener));
+            registered_listeners.determine_listeners_for_subscription_id(&subscription_id);
+        assert!(listeners.unwrap().len() == 1 && listeners.unwrap().contains(&expected_listener));
         let listeners = registered_listeners.determine_listeners_for_topic(topic);
         assert!(listeners.len() == 1 && listeners.contains(&expected_listener));
 
@@ -345,10 +356,13 @@ mod tests {
             .expect("Did not create new subscription ID");
 
         let listeners =
-            registered_listeners.determine_listeners_for_subscription_ids(&[subscription_id]);
+            registered_listeners.determine_listeners_for_subscription_id(&subscription_id);
 
         assert!(
-            listeners.len() == 1 && listeners.contains(&ComparableListener::new(listener.clone())),
+            listeners.unwrap().len() == 1
+                && listeners
+                    .unwrap()
+                    .contains(&ComparableListener::new(listener.clone())),
             "It should have been possible to register a single listener for one topic filter"
         );
 
@@ -392,9 +406,12 @@ mod tests {
             .expect("Failed to register listener")
             .expect("Did not create new subscription ID");
 
-        let listeners = registered_listeners
-            .determine_listeners_for_subscription_ids(&[subscription_id_1, subscription_id_2]);
-        assert!(listeners.len() == 1 && listeners.contains(&expected_listener));
+        let listeners =
+            registered_listeners.determine_listeners_for_subscription_id(&subscription_id_1);
+        let _listener_id_2 =
+            registered_listeners.determine_listeners_for_subscription_id(&subscription_id_2);
+
+        assert!(listeners.unwrap().len() == 1 && listeners.unwrap().contains(&expected_listener));
         let listeners = registered_listeners.determine_listeners_for_topic(topic_1);
         assert!(listeners.len() == 1 && listeners.contains(&expected_listener));
         let listeners = registered_listeners.determine_listeners_for_topic(topic_2);
@@ -421,30 +438,31 @@ mod tests {
             .is_none());
 
         let listeners =
-            registered_listeners.determine_listeners_for_subscription_ids(&[subscription_id]);
+            registered_listeners.determine_listeners_for_subscription_id(&subscription_id);
         assert!(
-            listeners.len() == 2
-                && listeners.contains(&comparable_listener_1)
-                && listeners.contains(&comparable_listener_2)
+            listeners.unwrap().len() == 2
+                && listeners.unwrap().contains(&comparable_listener_1)
+                && listeners.unwrap().contains(&comparable_listener_2)
         );
 
         assert!(!registered_listeners.is_last_listener(topic_filter, listener_1.clone()));
         assert!(registered_listeners.remove_listener(topic_filter, listener_1.clone()));
 
         let listeners =
-            registered_listeners.determine_listeners_for_subscription_ids(&[subscription_id]);
+            registered_listeners.determine_listeners_for_subscription_id(&subscription_id);
+        println!("{}", listeners.unwrap().len());
         assert!(
-            listeners.len() == 1
-                && !listeners.contains(&comparable_listener_1)
-                && listeners.contains(&comparable_listener_2)
+            listeners.unwrap().len() == 1
+                && !listeners.unwrap().contains(&comparable_listener_1)
+                && listeners.unwrap().contains(&comparable_listener_2)
         );
 
         assert!(registered_listeners.is_last_listener(topic_filter, listener_2.clone()));
         assert!(registered_listeners.remove_listener(topic_filter, listener_2.clone()));
 
         assert!(registered_listeners
-            .determine_listeners_for_subscription_ids(&[subscription_id])
-            .is_empty());
+            .determine_listeners_for_subscription_id(&subscription_id)
+            .is_none());
 
         assert!(!registered_listeners.remove_listener(topic_filter, listener_2.clone()));
     }
