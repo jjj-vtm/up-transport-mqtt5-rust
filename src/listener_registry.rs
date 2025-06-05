@@ -222,13 +222,7 @@ impl RegisteredListeners {
         if !registered_listeners.remove(&ComparableListener::new(listener.clone())) {
             return false;
         }
-
-        if registered_listeners.is_empty() {
-            // find subscription ID for topic filter and release the subscription ID
-            if let Some(sub_id) = self.find_subscription_id(topic_filter) {
-                self.release_subscription_id(sub_id, topic_filter);
-            }
-        }
+        let now_empty = registered_listeners.is_empty();
 
         // Remove from subscription_id mapping
         if let Some(sub_id) = self.find_subscription_id(topic_filter) {
@@ -237,6 +231,10 @@ impl RegisteredListeners {
                 .unwrap()
                 .1
                 .remove(&ComparableListener::new(listener));
+            if now_empty {
+                // find subscription ID for topic filter and release the subscription ID
+                self.release_subscription_id(sub_id, topic_filter);
+            }
         }
         true
     }
