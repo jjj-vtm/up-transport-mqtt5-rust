@@ -371,7 +371,7 @@ impl Mqtt5Transport {
                             .iter()
                             .flat_map(|id| {
                                 registered_listeners_read
-                                    .determine_listeners_for_subscription_id(id)
+                                    .determine_listeners_for_subscription_id(*id)
                             })
                             .fold(HashSet::new(), |acc, elem| {
                                 acc.union(elem).cloned().collect()
