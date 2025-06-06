@@ -42,7 +42,7 @@ impl Default for RegisteredListeners {
 impl RegisteredListeners {
     pub(crate) fn new(max_subscriptions: u16, max_listeners_per_subscription: u16) -> Self {
         let mut sub_topics = SubscriptionTopics::with_capacity((max_subscriptions + 1).into());
-        sub_topics.insert(("".to_owned(), HashSet::new()));
+        sub_topics.insert((String::new(), HashSet::new()));
 
         Self {
             // MQTT subscription identifiers start with 1 so we add a dummy value
@@ -229,9 +229,9 @@ impl RegisteredListeners {
         self.topic_listeners
             .matches(topic)
             .for_each(|(_topic_filter, listeners)| {
-                listeners.iter().for_each(|listener| {
+                for listener in listeners {
                     listeners_to_invoke.insert(listener.to_owned());
-                });
+                }
             });
         listeners_to_invoke
     }
@@ -258,7 +258,7 @@ impl SubscribedTopicProvider for RegisteredListeners {
             .map(|(subscription_id, topic_filter)| {
                 (
                     u16::try_from(subscription_id).unwrap(),
-                    topic_filter.0.to_owned(),
+                    topic_filter.0.clone(),
                 )
             })
             .collect()

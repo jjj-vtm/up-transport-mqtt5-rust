@@ -288,7 +288,7 @@ pub(crate) struct PahoBasedMqttClientOperations {
 }
 
 impl PahoBasedMqttClientOperations {
-    fn ustatus_from_paho_error(paho_error: paho_mqtt::Error) -> UStatus {
+    fn ustatus_from_paho_error(paho_error: &paho_mqtt::Error) -> UStatus {
         match paho_error {
             paho_mqtt::Error::Disconnected => {
                 UStatus::fail_with_code(UCode::UNAVAILABLE, "not connected to MQTT broker")
@@ -319,7 +319,7 @@ impl PahoBasedMqttClientOperations {
         paho_mqtt::CreateOptionsBuilder::new()
             .server_uri(&options.broker_uri)
             .client_id(options.client_id.clone().unwrap_or_default())
-            .max_buffered_messages(options.max_buffered_messages as i32)
+            .max_buffered_messages(i32::from(options.max_buffered_messages))
             .user_data(Box::new(RwLock::new(ConnectionState::default())))
             .create_client()
             .map_err(|e| {
@@ -383,7 +383,7 @@ impl PahoBasedMqttClientOperations {
 
     /// Updates the MQTT client's [user data](`ConnectionState`) with the connection properties
     /// contained in the CONNACK packet returned by the MQTT broker.
-    fn handle_connect_response(user_data: &paho_mqtt::UserData, token: paho_mqtt::ServerResponse) {
+    fn handle_connect_response(user_data: &paho_mqtt::UserData, token: &paho_mqtt::ServerResponse) {
         if let Some(connection_properties) = user_data.downcast_ref::<RwLock<ConnectionState>>() {
             if let Ok(mut props) = connection_properties.write() {
                 props.subscription_ids_supported = token
@@ -409,9 +409,12 @@ impl PahoBasedMqttClientOperations {
     ) -> Result<paho_mqtt::Properties, paho_mqtt::Error> {
         let mut properties = paho_mqtt::Properties::new();
         properties
-            .push_int(paho_mqtt::PropertyCode::SubscriptionIdentifier, id as i32)
+            .push_int(
+                paho_mqtt::PropertyCode::SubscriptionIdentifier,
+                i32::from(id),
+            )
             .inspect_err(|e| {
-                debug!("Failed to create MQTT 5 SubscriptionIdentifier property: {e}")
+                debug!("Failed to create MQTT 5 SubscriptionIdentifier property: {e}");
             })?;
         Ok(properties)
     }
@@ -435,12 +438,11 @@ impl PahoBasedMqttClientOperations {
                     subscription_id, topic_filter, err,
                 );
                 return Err(err);
-            } else {
-                debug!(
-                    "Successfully recreated subscription [id: {}, topic filter: {}]",
-                    subscription_id, topic_filter
-                );
             }
+            debug!(
+                "Successfully recreated subscription [id: {}, topic filter: {}]",
+                subscription_id, topic_filter
+            );
         }
         Ok(())
     }
@@ -460,7 +462,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
             .await
             .map(|response| {
                 if let Some(user_data) = self.inner_mqtt_client.user_data() {
-                    Self::handle_connect_response(user_data, response);
+                    Self::handle_connect_response(user_data, &response);
                 }
             })
             .map_err(|e| {
@@ -507,7 +509,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
                 if let Some(user_data) = mqtt_client.user_data() {
                     // this will always be the case because we set the user data during
                     // construction of the AsyncClient
-                    Self::handle_connect_response(user_data, response);
+                    Self::handle_connect_response(user_data, &response);
                     if !Self::is_session_present(user_data) {
                         // we only need to manually reestablish the subscriptions if
                         // the server has not used any session state for the new connection
@@ -571,8 +573,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
         self.inner_mqtt_client
             .publish(mqtt_message)
             .await
-            .map_err(Self::ustatus_from_paho_error)
-            .map(|_| ())
+            .map_err(|paho_error| Self::ustatus_from_paho_error(&paho_error))
     }
 
     async fn subscribe(&self, topic: &str, id: u16) -> Result<(), UStatus> {
@@ -601,7 +602,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
             // QOS 1 - Delivered and received at least once
             .subscribe_with_options(topic, paho_mqtt::QOS_1, None, subscription_properties)
             .await
-            .map_err(Self::ustatus_from_paho_error)
+            .map_err(|paho_error| Self::ustatus_from_paho_error(&paho_error))
             .map(|_| ())
     }
 
@@ -609,7 +610,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
         self.inner_mqtt_client
             .unsubscribe(topic)
             .await
-            .map_err(Self::ustatus_from_paho_error)
+            .map_err(|paho_error| Self::ustatus_from_paho_error(&paho_error))
             .map(|_| ())
     }
 }
