@@ -182,7 +182,7 @@ impl TransportMode {
     ) -> Result<String, UUriError> {
         match self {
             // [impl->dsn~up-transport-mqtt5-e2e-topic-names~1]
-            TransportMode::InVehicle => {
+            Self::InVehicle => {
                 let mut topic = String::new();
                 topic.push_str(&Self::uri_to_e2e_mqtt_topic(source, fallback_authority));
                 if let Some(uri) = sink {
@@ -192,8 +192,13 @@ impl TransportMode {
                 Ok(topic)
             }
             // [impl->dsn~up-transport-mqtt5-d2d-topic-names~1]
-            TransportMode::OffVehicle => {
-                if let Some(uri) = sink {
+            Self::OffVehicle => sink.map_or_else(
+                || {
+                    Err(UUriError::serialization_error(
+                        "Off-Vehicle transport requires sink URI for creating MQTT topic",
+                    ))
+                },
+                |uri| {
                     let mut topic = String::new();
                     topic.push_str(&Self::uri_to_authority_topic_segment(
                         source,
@@ -205,12 +210,8 @@ impl TransportMode {
                         fallback_authority,
                     ));
                     Ok(topic)
-                } else {
-                    Err(UUriError::serialization_error(
-                        "Off-Vehicle transport requires sink URI for creating MQTT topic",
-                    ))
-                }
-            }
+                },
+            ),
         }
     }
 }
@@ -369,7 +370,7 @@ impl Mqtt5Transport {
                     } else {
                         subscription_ids
                             .iter()
-                            .flat_map(|id| {
+                            .filter_map(|id| {
                                 registered_listeners_read
                                     .determine_listeners_for_subscription_id(*id)
                             })
@@ -417,10 +418,12 @@ impl Mqtt5Transport {
         let props = mapping::create_mqtt_properties_from_uattributes(attributes)?;
 
         // Get mqtt topic string from source and sink uuris
-        let src_uri = attributes.source.as_ref().ok_or(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
-            "uProtocol Message has no source URI",
-        ))?;
+        let src_uri = attributes.source.as_ref().ok_or_else(|| {
+            UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "uProtocol Message has no source URI",
+            )
+        })?;
         // [impl->dsn~up-transport-mqtt5-e2e-topic-names~1]
         // [impl->dsn~up-transport-mqtt5-d2d-topic-names~1]
         let topic = self
@@ -443,11 +446,11 @@ impl Mqtt5Transport {
         self.mqtt_client
             .publish(msg)
             .await
-            .inspect(|_| {
+            .inspect(|()| {
                 debug!(
                     "Successfully sent uProtocol message [MQTT topic: {}]",
                     topic
-                )
+                );
             })
             .inspect_err(|e| {
                 debug!("Failed to send uProtocol message [MQTT topic: {topic}]: {e}");
@@ -479,12 +482,11 @@ impl Mqtt5Transport {
                 // If subscribe fails, add subscription id back to free subscription ids.
                 registered_listeners_write.release_subscription_id(subscription_id, topic_filter);
                 return Err(sub_err);
-            } else {
-                debug!(
-                    "Created new subscription [topic filter: {}, id: {}] for listener",
-                    topic_filter, subscription_id
-                );
-            };
+            }
+            debug!(
+                "Created new subscription [topic filter: {}, id: {}] for listener",
+                topic_filter, subscription_id
+            );
         }
         Ok(())
     }
