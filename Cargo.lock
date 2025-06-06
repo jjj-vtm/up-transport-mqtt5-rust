@@ -2206,6 +2206,7 @@ dependencies = [
  "mockall",
  "paho-mqtt",
  "protobuf",
+ "slab",
  "test-case",
  "testcontainers",
  "tokio",
