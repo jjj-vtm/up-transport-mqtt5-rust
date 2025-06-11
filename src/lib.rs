@@ -256,7 +256,6 @@ impl Mqtt5Transport {
     /// * `authority_name` - Authority name of the local uEntity.
     ///
     /// # Errors
-    /// 
     /// Will return an `Err` if the creation of the Paho client fails or if the incoming message
     /// stream is already taken.
     pub async fn new(
