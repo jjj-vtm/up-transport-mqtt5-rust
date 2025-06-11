@@ -254,6 +254,11 @@ impl Mqtt5Transport {
     /// # Arguments
     /// * `options` - Configuration options for the transport.
     /// * `authority_name` - Authority name of the local uEntity.
+    ///
+    /// # Errors
+    /// 
+    /// Will return an `Err` if the creation of the Paho client fails or if the incoming message
+    /// stream is already taken.
     pub async fn new(
         options: Mqtt5TransportOptions,
         authority_name: String,
