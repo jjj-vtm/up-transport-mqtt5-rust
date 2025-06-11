@@ -69,6 +69,8 @@ impl RegisteredListeners {
     fn find_subscription_id(&self, topic_filter: &str) -> Option<SubscriptionIdentifier> {
         self.subscription_topics.iter().find_map(|(idx, v)| {
             if v.0 == topic_filter {
+                // cannot fail because the slab has been initialized
+                // with a capacity <= u16::MAX
                 Some(u16::try_from(idx).expect(NO_VALID_U16))
             } else {
                 None
