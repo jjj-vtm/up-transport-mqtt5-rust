@@ -453,9 +453,9 @@ mod tests {
             registered_listeners.determine_listeners_for_subscription_id(subscription_id);
         println!("{}", listeners.unwrap().len());
         assert!(
-            listeners.unwrap().len() == 1
-                && !listeners.unwrap().contains(&comparable_listener_1)
-                && listeners.unwrap().contains(&comparable_listener_2)
+            listeners.is_some_and(|l| l.len() == 1
+                && !l.contains(&comparable_listener_1)
+                && l.contains(&comparable_listener_2))
         );
 
         assert!(registered_listeners.is_last_listener(topic_filter, listener_2.clone()));
