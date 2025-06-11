@@ -24,6 +24,8 @@ pub(crate) type SubscriptionIdentifier = u16;
 type SubscriptionTopics = Slab<(String, HashSet<ComparableListener>)>;
 type TopicListeners = paho_mqtt::TopicMatcher<HashSet<ComparableListener>>;
 
+const NO_VALID_U16: &str = "SubscriptionId not a valid u16";
+
 pub(crate) struct RegisteredListeners {
     /// Mapping of subscription identifiers to topic filters.
     subscription_topics: SubscriptionTopics,
@@ -41,11 +43,16 @@ impl Default for RegisteredListeners {
 
 impl RegisteredListeners {
     pub(crate) fn new(max_subscriptions: u16, max_listeners_per_subscription: u16) -> Self {
+        // Since subscribtion ids start at 1 we can only create a maximum number of u16:MAX - 1
+        assert!(max_subscriptions < u16::MAX);
+        // Note that this assert implies that the slab will at most contain u16:MAX elements hence any
+        // index coming from iteration is a valid u16.
         let mut sub_topics = SubscriptionTopics::with_capacity((max_subscriptions + 1).into());
+
+        // MQTT subscription identifiers start with 1 so we add a dummy value
         sub_topics.insert((String::new(), HashSet::new()));
 
         Self {
-            // MQTT subscription identifiers start with 1 so we add a dummy value
             subscription_topics: sub_topics,
             topic_listeners: TopicListeners::new(),
             max_listeners_per_subscription: max_listeners_per_subscription as usize,
@@ -60,9 +67,9 @@ impl RegisteredListeners {
     }
 
     fn find_subscription_id(&self, topic_filter: &str) -> Option<SubscriptionIdentifier> {
-        self.subscription_topics.iter().find_map(|(k, v)| {
+        self.subscription_topics.iter().find_map(|(idx, v)| {
             if v.0 == topic_filter {
-                Some(u16::try_from(k).unwrap())
+                Some(u16::try_from(idx).expect(NO_VALID_U16))
             } else {
                 None
             }
@@ -162,7 +169,7 @@ impl RegisteredListeners {
             listeners.insert(comp_listener);
             self.topic_listeners.insert(topic_filter, listeners);
             debug!("Added listener with subscribtion_id: {}", subscription_id);
-            Ok(Some(subscription_id.try_into().unwrap()))
+            Ok(Some(u16::try_from(subscription_id).expect(NO_VALID_U16)))
         }
     }
 
@@ -257,7 +264,7 @@ impl SubscribedTopicProvider for RegisteredListeners {
             .iter()
             .map(|(subscription_id, topic_filter)| {
                 (
-                    u16::try_from(subscription_id).unwrap(),
+                    u16::try_from(subscription_id).expect(NO_VALID_U16),
                     topic_filter.0.clone(),
                 )
             })
@@ -267,10 +274,15 @@ impl SubscribedTopicProvider for RegisteredListeners {
 
 #[cfg(test)]
 mod tests {
-
     use up_rust::MockUListener;
 
     use super::*;
+
+    #[test]
+    #[should_panic]
+    fn test_panic_on_too_many_max_subs() {
+        RegisteredListeners::new(u16::MAX, 5);
+    }
 
     #[test]
     fn test_add_listener() {
