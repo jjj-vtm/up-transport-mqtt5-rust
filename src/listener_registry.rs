@@ -55,7 +55,7 @@ impl RegisteredListeners {
         Self {
             subscription_topics: sub_topics,
             topic_listeners: TopicListeners::new(),
-            max_listeners_per_subscription: max_listeners_per_subscription as usize,
+            max_listeners_per_subscription: max_listeners_per_subscription.into(),
         }
     }
 

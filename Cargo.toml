@@ -103,3 +103,9 @@ max_combination_size = 3
 # Tests using #[cfg(docker_available)] will then only be compiled (and run)
 # if Docker is actually available on the platform.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docker_available)'] }
+
+[lints.clippy]
+ ignored_unit_patterns = "warn"
+ or_fun_call = "warn"
+ as_conversions = "warn"
+
