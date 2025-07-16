@@ -364,7 +364,7 @@ impl PahoBasedMqttClientOperations {
         paho_mqtt::CreateOptionsBuilder::new()
             .server_uri(&options.broker_uri)
             .client_id(options.client_id.clone().unwrap_or_default())
-            .max_buffered_messages(options.max_buffered_messages as i32)
+            .max_buffered_messages(options.max_buffered_messages.into())
             .user_data(Box::new(UserDataType::default()))
             .create_client()
             .map_err(|e| {
