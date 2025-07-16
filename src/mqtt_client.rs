@@ -436,7 +436,7 @@ impl PahoBasedMqttClientOperations {
                 "subscription IDs supported: {}",
                 state.subscription_ids_supported
             );
-             if let Some(connect_response) = token.connect_response() {
+            if let Some(connect_response) = token.connect_response() {
                 state.session_present = connect_response.session_present;
                 // the MQTT5 broker will automatically reestablish the subscriptions
                 // if session state is present
@@ -551,7 +551,7 @@ impl MqttClientOperations for PahoBasedMqttClientOperations {
         })
         .await
         {
-           Err(_err) => {
+            Err(_err) => {
                 // we cannot reach this arm because we do not limit the number of attempts to connnect
             }
             Ok(response) => {

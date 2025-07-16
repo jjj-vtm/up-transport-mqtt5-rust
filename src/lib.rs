@@ -29,8 +29,8 @@ and does not spawn any threads itself.
 
 [tokio `Runtime`]: https://docs.rs/tokio/latest/tokio/runtime/index.html
 */
-use std::sync::Arc;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use async_channel::Receiver;
 use bytes::Bytes;
